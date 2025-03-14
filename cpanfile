@@ -1,0 +1,9 @@
+requires 'XML::Feed';
+requires 'LWP::UserAgent';
+requires 'LWP::Protocol::https';
+requires 'URI';
+requires 'Try::Tiny';
+requires 'Path::Tiny';
+requires 'Term::ProgressBar';
+requires 'Log::Log4perl';
+requires 'YAML::XS';

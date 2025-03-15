@@ -19,14 +19,14 @@ binmode(STDOUT, ":encoding(UTF-8)");
 
 # Konfiguration laden
 my $config_file = 'config.yml';
-GetOptions('config=s' => \$config_file) or die "Fehler beim Parsen der Kommandozeilenoptionen\n";
+GetOptions('config=s' => \$config_file) or die "Error parsing commandline options\n";
 
 # Lade und validiere Konfiguration
 my $config = eval { LoadFile($config_file) };
-die "Fehler beim Laden der Konfigurationsdatei $config_file: $@" if $@;
+die "Error reading $config_file: $@" if $@;
 
-die "Ungültige Konfiguration: 'settings' fehlt\n" unless $config->{settings};
-die "Ungültige Konfiguration: 'feeds' fehlt\n" unless $config->{feeds};
+die "Unknown config option: 'settings' fehlt\n" unless $config->{settings};
+die "Unknown config option: 'feeds' fehlt\n" unless $config->{feeds};
 
 # Initialisiere Logging
 #Log::Log4perl->easy_init($INFO);
@@ -41,11 +41,11 @@ Log::Log4perl->easy_init(
 my $settings = $config->{settings};
 my $download_dir = path($settings->{download_dir})->absolute;
 
-INFO("Verwende Download-Verzeichnis: $download_dir");
+INFO("Use download folder: $download_dir");
 
 # Erstelle User Agent mit Konfiguration
 my $ua = LWP::UserAgent->new(
-    agent => $settings->{user_agent} // 'PodcastDownloader/1.0',
+    agent => $settings->{user_agent} // 'PodcastDownloader (poddl.pl)/1.0.0',
     timeout => $settings->{timeout} // 30,
     ssl_opts => { verify_hostname => 1 },
     max_redirect => $settings->{max_redirects} // 5,
@@ -57,19 +57,19 @@ sub check_download_dir {
     
     # Prüfe ob das Verzeichnis existiert
     if (!-e $dir) {
-        ERROR("Download-Verzeichnis existiert nicht: $dir");
+        ERROR("download folder not existing: $dir");
         return 0;
     }
     
     # Prüfe ob es ein Verzeichnis ist
     if (!-d $dir) {
-        ERROR("$dir ist kein Verzeichnis");
+        ERROR("$dir not a folder");
         return 0;
     }
     
     # Prüfe Schreibrechte
     if (!-w $dir) {
-        ERROR("Keine Schreibrechte im Verzeichnis $dir");
+        ERROR("No write permissons on $dir");
         return 0;
     }
     
@@ -102,7 +102,7 @@ sub check_existing_file {
     return 1 if $current_size == $expected_size;  # Datei ist vollständig
     
     # Datei existiert, ist aber unvollständig
-    INFO("Datei existiert bereits, aber ist unvollständig ($current_size/$expected_size Bytes) - Starte neuen Download");
+    INFO("File already exists, BUT wrong with size ($current_size/$expected_size Bytes) - re-download");
     return 0;
 }
 
@@ -127,7 +127,7 @@ sub download_file {
     
     # Überprüfe Download-Verzeichnis vor jedem Download
     unless (check_download_dir($download_dir)) {
-        ERROR("[$feed_name] Download von $filename abgebrochen - Problem mit Download-Verzeichnis");
+        ERROR("[$feed_name] Download of $filename candeled - error with download folder");
         return 0;
     }
     
@@ -146,24 +146,24 @@ sub download_file {
 
     # Prüfe, ob die Datei bereits vollständig heruntergeladen wurde
     if (check_existing_file($file_path, $total_bytes)) {
-        INFO("[$feed_name] Datei bereits vollständig heruntergeladen: $filename");
+        INFO("[$feed_name] File already downloaded: $filename") if ($settings->{only_new_info});
         if ($settings->{check_pubDate}) {
-            INFO("[$feed_name] touch -t $cdate '$file_path'");
+            INFO("[$feed_name] touch -t $cdate '$file_path'") if ($settings->{only_new_info});
             `touch -t $cdate '$file_path'`;
         }
         return 1;
     } else {
         $head_response = $ua->head($url);
         $total_bytes = $head_response->header('Content-Length') // 0;
-        INFO("[$feed_name] Neue Datei gefunden: $filename ($total_bytes Bytes)");
+        INFO("[$feed_name] New file found: $filename ($total_bytes Bytes)");
     }
     
     if ($total_bytes <= 2) {
-        INFO("[$feed_name] Content-Length Header nicht richtig gesetzt: $total_bytes");
+        INFO("[$feed_name] Content-Length Header wrong format: $total_bytes");
         $total_bytes = 0;
     }
     
-    INFO("[$feed_name] Lade herunter: $filename mit $total_bytes Bytes");
+    INFO("[$feed_name] Download: $filename having $total_bytes Bytes");
     INFO("[$feed_name] URL: $url");
     
     # Erstelle HTTP-Request
@@ -178,6 +178,7 @@ sub download_file {
         show_download_progress($feed_name, $filename, $bytes_received, $total_bytes) unless ($bytes_received > $total_bytes);
         return 1;
     });
+    INFO("\n");
     
     # Überprüfe auf Redirects und folge ihnen manuell falls nötig
     if ($response->is_redirect) {
@@ -186,7 +187,7 @@ sub download_file {
         
         while ($response->is_redirect && $redirect_count < $max_redirects) {
             my $new_url = $response->header('Location');
-            INFO("[$feed_name] Folge Redirect zu: $new_url");
+            INFO("[$feed_name] Follow redirect to: $new_url");
             
             
             # Hole neue Dateigröße
@@ -194,13 +195,13 @@ sub download_file {
             $total_bytes = $head_response->header('Content-Length') // 0;
 
             if ($total_bytes <= 2) {
-                INFO("[$feed_name] Content-Length Header nicht richtig gesetzt: $total_bytes");
+                INFO("[$feed_name] Content-Length Header wrong: $total_bytes");
                 $total_bytes = 0;
             }
     
             # Prüfe erneut nach Redirect
             if (check_existing_file($file_path, $total_bytes)) {
-                INFO("[$feed_name] Datei bereits vollständig heruntergeladen: $filename");
+                INFO("[$feed_name] Aready downloaded sccueesfully: $filename");
                 return 1;
             }
             
@@ -215,13 +216,14 @@ sub download_file {
                 show_download_progress($feed_name, $filename, $bytes_received, $total_bytes) unless ($bytes_received > $total_bytes);
                 return 1;
             });
-            
+            INFO("\n");
+
             $redirect_count++;
         }
         
         if ($redirect_count >= $max_redirects) {
             ERROR("\n");
-            ERROR("[$feed_name] Zu viele Redirects für URL: $url");
+            ERROR("[$feed_name] Too many redirects for URL: $url");
             return 0;
         }
     }
@@ -232,7 +234,7 @@ sub download_file {
         # Überprüfe die Größe der gespeicherten Datei
         my $final_size = -s $file_path;
         if ($total_bytes && $final_size != $total_bytes) {
-            ERROR("[$feed_name] Fehler beim Speichern von $filename: Größe stimmt nicht überein ($final_size != $total_bytes)");
+            ERROR("[$feed_name] Error saving $filename: filesize does not match ($final_size != $total_bytes)");
             return 0;
         }
         
@@ -240,10 +242,11 @@ sub download_file {
         INFO("[$feed_name] touch -t $cdate '$file_path'");
         `touch -t $cdate '$file_path'`;
 
-        INFO("[$feed_name] Erfolgreich heruntergeladen: $filename");
+        INFO("\n");
+        INFO("[$feed_name] Download sccueesfull: $filename");
         return 1;
     } else {
-        ERROR("[$feed_name] Fehler beim Herunterladen von $url: " . $response->status_line);
+        ERROR("[$feed_name] Error downloding $url: " . $response->status_line);
         return 0;
     }
     
@@ -261,17 +264,17 @@ sub process_feed {
     
     # Verhindere Endlosschleifen durch bereits verarbeitete URLs
     if ($processed_urls->{$feed_url}) {
-        INFO("[$feed_name] Feed URL wurde bereits verarbeitet: $feed_url");
+        INFO("[$feed_name] Feed URL already handled: $feed_url");
         return;
     }
     $processed_urls->{$feed_url} = 1;
     
-    INFO("Verarbeite Feed: $feed_name ($feed_url)");
+    INFO("Analyse feed: $feed_name ($feed_url)");
     
     try {
         # Erstelle einen separaten User Agent für Feed-Downloads
         my $feed_ua = LWP::UserAgent->new(
-            agent => $settings->{user_agent} // 'PodcastDownloader/1.0',
+            agent => $settings->{user_agent} // 'PodcastDownloader (poddl.pl)/1.0.0',
             timeout => $settings->{timeout} // 30,
             ssl_opts => { verify_hostname => 1 },
             max_redirect => $settings->{max_redirects} // 5,
@@ -280,7 +283,7 @@ sub process_feed {
         my $feed_response = $feed_ua->get($feed_url);
         
         if (!$feed_response->is_success) {
-            die "Konnte Feed nicht herunterladen: " . $feed_response->status_line;
+            die "Error downloding feed: " . $feed_response->status_line;
         }
         
         my $feed_content = $feed_response->content;
@@ -290,7 +293,7 @@ sub process_feed {
         my @entries = $feed->entries;
         my $total_entries = scalar @entries;
         INFO("##############################################################");
-        INFO("[$feed_name] Gefunden: $total_entries Einträge");
+        INFO("[$feed_name] found: $total_entries Einträge");
         
         my $downloaded_entries = 0;
         my $failed_entries = 0;
@@ -322,17 +325,17 @@ sub process_feed {
             my $success = try {
                 return download_file($url, $filename, $feed_name, $formatted_date);
             } catch {
-                ERROR("[$feed_name] Erster Download-Versuch fehlgeschlagen für $filename: $_");
+                ERROR("[$feed_name] First download with error for $filename: $_");
                 return 0;
             };
             
             # Zweiter Versuch bei Fehler
             if (!$success) {
-                INFO("[$feed_name] Starte zweiten Download-Versuch für: $filename");
+                INFO("[$feed_name] Start 2nd download for: $filename");
                 $success = try {
                     return download_file($url, $filename, $feed_name, $formatted_date);
                 } catch {
-                    ERROR("[$feed_name] Auch zweiter Download-Versuch fehlgeschlagen für $filename: $_");
+                    ERROR("[$feed_name] 2nd downloadwith error for $filename: $_, too");
                     return 0;
                 };
             }
@@ -344,12 +347,12 @@ sub process_feed {
             }
         }
         
-        INFO("[$feed_name] Download abgeschlossen: $downloaded_entries von $total_entries Einträgen heruntergeladen, $failed_entries fehlgeschlagen");
+        INFO("[$feed_name] Download finished: $downloaded_entries of $total_entries entries downloaded, $failed_entries with error.");
         
         # Suche nach 'next' Link im Feed
         if ($feed_content =~ /<atom:link[^>]*rel="next"[^>]*href="([^"]+)"/) {
             my $next_url = $1;
-            INFO("[$feed_name] Gefunden: Next-Feed-URL: $next_url");
+            INFO("[$feed_name] Found: next feed URL: $next_url");
             
             # Rekursiv den nächsten Feed verarbeiten
             my $next_feed_config = {
@@ -361,7 +364,7 @@ sub process_feed {
         }
         
     } catch {
-        ERROR("[$feed_name] Fehler beim Verarbeiten des Feeds: $_");
+        ERROR("[$feed_name] Error analysing feed: $_");
     };
 }
 
@@ -380,14 +383,14 @@ sub guess_extension {
 }
 
 # Hauptprogramm
-INFO("Starte Podcast-Downloader");
-INFO("Verwende Konfigurationsdatei: $config_file");
+INFO("Start Podcast-Downloader");
+INFO("Read config.yml: $config_file");
 
 my $total_feeds = scalar(grep { $_->{enabled} } @{$config->{feeds}});
-INFO("Verarbeite $total_feeds aktive Feeds");
-
+INFO("ANalyse $total_feeds active feeds");
+ac
 for my $feed (@{$config->{feeds}}) {
     process_feed($feed);
 }
 
-INFO("Verarbeitung abgeschlossen"); 
+INFO("Downloads finished"); 

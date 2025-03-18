@@ -388,7 +388,7 @@ INFO("Read config.yml: $config_file");
 
 my $total_feeds = scalar(grep { $_->{enabled} } @{$config->{feeds}});
 INFO("ANalyse $total_feeds active feeds");
-ac
+
 for my $feed (@{$config->{feeds}}) {
     process_feed($feed);
 }

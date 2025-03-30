@@ -15,15 +15,22 @@ use YAML::XS qw(LoadFile);
 use Getopt::Long;
 use HTTP::Request;
 
+# https://misc.flogisoft.com/bash/tip_colors_and_formatting
+my $cRed = "\e[31m";
+my $cGreen = "\e[32m";
+my $cYellow = "\e[33m";
+my $cClear = "\e[0m";
+
+
 binmode(STDOUT, ":encoding(UTF-8)");
 
 # Konfiguration laden
 my $config_file = 'config.yml';
-GetOptions('config=s' => \$config_file) or die "Error parsing commandline options\n";
+GetOptions('config=s' => \$config_file) or die "${cRed}Error parsing commandline options${cClear}\n";
 
 # Lade und validiere Konfiguration
 my $config = eval { LoadFile($config_file) };
-die "Error reading $config_file: $@" if $@;
+die "${cRed}Error reading $config_file:${cClear} $@" if $@;
 
 die "Unknown config option: 'settings' fehlt\n" unless $config->{settings};
 die "Unknown config option: 'feeds' fehlt\n" unless $config->{feeds};
@@ -57,19 +64,19 @@ sub check_download_dir {
     
     # Prüfe ob das Verzeichnis existiert
     if (!-e $dir) {
-        ERROR("download folder not existing: $dir");
+        ERROR("${cRed}download folder not existing: $dir${cClear}");
         return 0;
     }
     
     # Prüfe ob es ein Verzeichnis ist
     if (!-d $dir) {
-        ERROR("$dir not a folder");
+        ERROR("${cRed}$dir not a folder${cClear}");
         return 0;
     }
     
     # Prüfe Schreibrechte
     if (!-w $dir) {
-        ERROR("No write permissons on $dir");
+        ERROR("${cRed}No write permissons on $dir${cClear}");
         return 0;
     }
     
@@ -85,7 +92,7 @@ sub show_download_progress {
     
     my $bar = "[" . ("#" x $filled) . ("-" x $empty) . "]";
     my $size_info = $total_bytes ? sprintf("%.1f/%.1f MB", $bytes_received/(1024*1024), $total_bytes/(1024*1024)) : sprintf("%.1f MB", $bytes_received/(1024*1024));
-    printf("\r                    [$feed_name] %s %s %3d%% %s", $filename, $bar, $percent, $size_info);
+    printf("\r                    [${cGreen}${feed_name}${cClear}] %s %s %3d%% %s", $filename, $bar, $percent, $size_info);
 }
 
 sub check_existing_file {
@@ -127,7 +134,7 @@ sub download_file {
     
     # Überprüfe Download-Verzeichnis vor jedem Download
     unless (check_download_dir($download_dir)) {
-        ERROR("[$feed_name] Download of $filename candeled - error with download folder");
+        ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Download of $filename candeled - error with download folder${cClear}");
         return 0;
     }
     
@@ -146,25 +153,25 @@ sub download_file {
 
     # Prüfe, ob die Datei bereits vollständig heruntergeladen wurde
     if (check_existing_file($file_path, $total_bytes)) {
-        INFO("[$feed_name] File already downloaded: $filename") if ($settings->{only_new_info});
+        INFO("[${cGreen}${feed_name}${cClear}] File already downloaded: $filename") if ($settings->{only_new_info});
         if ($settings->{check_pubDate}) {
-            INFO("[$feed_name] touch -t $cdate '$file_path'") if ($settings->{only_new_info});
+            INFO("[${cGreen}${feed_name}${cClear}] touch -t $cdate '$file_path'") if ($settings->{only_new_info});
             `touch -t $cdate '$file_path'`;
         }
         return 1;
     } else {
         $head_response = $ua->head($url);
         $total_bytes = $head_response->header('Content-Length') // 0;
-        INFO("[$feed_name] New file found: $filename ($total_bytes Bytes)");
+        INFO("[${cGreen}${feed_name}${cClear}] New file found: $filename ($total_bytes Bytes)");
     }
     
     if ($total_bytes <= 2) {
-        INFO("[$feed_name] Content-Length Header wrong format: $total_bytes");
+        INFO("[${cGreen}${feed_name}${cClear}] Content-Length Header wrong format: $total_bytes");
         $total_bytes = 0;
     }
     
-    INFO("[$feed_name] Download: $filename having $total_bytes Bytes");
-    INFO("[$feed_name] URL: $url");
+    INFO("[${cGreen}${feed_name}${cClear}] Download: $filename having $total_bytes Bytes");
+    INFO("[${cGreen}${feed_name}${cClear}] URL: $url");
     
     # Erstelle HTTP-Request
     my $request = HTTP::Request->new(GET => $url);
@@ -187,7 +194,7 @@ sub download_file {
         
         while ($response->is_redirect && $redirect_count < $max_redirects) {
             my $new_url = $response->header('Location');
-            INFO("[$feed_name] Follow redirect to: $new_url");
+            INFO("[${cGreen}${feed_name}${cClear}] Follow redirect to: $new_url");
             
             
             # Hole neue Dateigröße
@@ -195,13 +202,13 @@ sub download_file {
             $total_bytes = $head_response->header('Content-Length') // 0;
 
             if ($total_bytes <= 2) {
-                INFO("[$feed_name] Content-Length Header wrong: $total_bytes");
+                INFO("[${cGreen}${feed_name}${cClear}] Content-Length Header wrong: $total_bytes");
                 $total_bytes = 0;
             }
     
             # Prüfe erneut nach Redirect
             if (check_existing_file($file_path, $total_bytes)) {
-                INFO("[$feed_name] Aready downloaded sccueesfully: $filename");
+                INFO("[${cGreen}${feed_name}${cClear}] Aready downloaded sccueesfully: $filename");
                 return 1;
             }
             
@@ -223,7 +230,7 @@ sub download_file {
         
         if ($redirect_count >= $max_redirects) {
             ERROR("\n");
-            ERROR("[$feed_name] Too many redirects for URL: $url");
+            ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Too many redirects for URL: $url${cClear}");
             return 0;
         }
     }
@@ -234,19 +241,19 @@ sub download_file {
         # Überprüfe die Größe der gespeicherten Datei
         my $final_size = -s $file_path;
         if ($total_bytes && $final_size != $total_bytes) {
-            ERROR("[$feed_name] Error saving $filename: filesize does not match ($final_size != $total_bytes)");
+            ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Error saving $filename: filesize does not match ($final_size != $total_bytes)${cClear}");
             return 0;
         }
         
         # bei neuen Dateien wird das Creation-Date immer korrigiert
-        INFO("[$feed_name] touch -t $cdate '$file_path'");
+        INFO("[${cGreen}${feed_name}${cClear}] touch -t $cdate '$file_path'");
         `touch -t $cdate '$file_path'`;
 
         INFO("\n");
-        INFO("[$feed_name] Download sccueesfull: $filename");
+        INFO("[${cGreen}${feed_name}${cClear}] Download sccueesfull: $filename");
         return 1;
     } else {
-        ERROR("[$feed_name] Error downloding $url: " . $response->status_line);
+        ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Error downloding $url: " . $response->status_line . "${cClear}");
         return 0;
     }
     
@@ -264,7 +271,7 @@ sub process_feed {
     
     # Verhindere Endlosschleifen durch bereits verarbeitete URLs
     if ($processed_urls->{$feed_url}) {
-        INFO("[$feed_name] Feed URL already handled: $feed_url");
+        INFO("[${cGreen}${feed_name}${cClear}] Feed URL already handled: $feed_url");
         return;
     }
     $processed_urls->{$feed_url} = 1;
@@ -292,8 +299,8 @@ sub process_feed {
         
         my @entries = $feed->entries;
         my $total_entries = scalar @entries;
-        INFO("##############################################################");
-        INFO("[$feed_name] found: $total_entries Einträge");
+        INFO("${cYellow}##############################################################${cClear}");
+        INFO("[${cGreen}${feed_name}${cClear}] ${cYellow}found: $total_entries Einträge${cClear}");
         
         my $downloaded_entries = 0;
         my $failed_entries = 0;
@@ -307,7 +314,7 @@ sub process_feed {
             my $formatted_date = '';
             if ($pub_date) {
                 $formatted_date = $pub_date->strftime("%Y%m%d%H%M.%S");
-                # INFO("[$feed_name] Publikationsdatum für '$title': $formatted_date");
+                # INFO("[${cGreen}${feed_name}${cClear}] Publikationsdatum für '$title': $formatted_date");
             }
             
             next unless $enclosure;
@@ -325,17 +332,17 @@ sub process_feed {
             my $success = try {
                 return download_file($url, $filename, $feed_name, $formatted_date);
             } catch {
-                ERROR("[$feed_name] First download with error for $filename: $_");
+                ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}First download with error for $filename: $_${cClear}");
                 return 0;
             };
             
             # Zweiter Versuch bei Fehler
             if (!$success) {
-                INFO("[$feed_name] Start 2nd download for: $filename");
+                INFO("[${cGreen}${feed_name}${cClear}] Start 2nd download for: $filename");
                 $success = try {
                     return download_file($url, $filename, $feed_name, $formatted_date);
                 } catch {
-                    ERROR("[$feed_name] 2nd downloadwith error for $filename: $_, too");
+                    ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}2nd downloadwith error for $filename: $_, too${cClear}");
                     return 0;
                 };
             }
@@ -347,12 +354,12 @@ sub process_feed {
             }
         }
         
-        INFO("[$feed_name] Download finished: $downloaded_entries of $total_entries entries downloaded, $failed_entries with error.");
+        INFO("[${cGreen}${feed_name}${cClear}] Download finished: $downloaded_entries of $total_entries entries downloaded, $failed_entries with error.");
         
         # Suche nach 'next' Link im Feed
         if ($feed_content =~ /<atom:link[^>]*rel="next"[^>]*href="([^"]+)"/) {
             my $next_url = $1;
-            INFO("[$feed_name] Found: next feed URL: $next_url");
+            INFO("[${cGreen}${feed_name}${cClear}] Found: next feed URL: $next_url");
             
             # Rekursiv den nächsten Feed verarbeiten
             my $next_feed_config = {
@@ -364,7 +371,7 @@ sub process_feed {
         }
         
     } catch {
-        ERROR("[$feed_name] Error analysing feed: $_");
+        ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Error analysing feed: $_${cClear}");
     };
 }
 
@@ -387,7 +394,7 @@ INFO("Start Podcast-Downloader");
 INFO("Read config.yml: $config_file");
 
 my $total_feeds = scalar(grep { $_->{enabled} } @{$config->{feeds}});
-INFO("ANalyse $total_feeds active feeds");
+INFO("Analyse $total_feeds active feeds");
 
 for my $feed (@{$config->{feeds}}) {
     process_feed($feed);

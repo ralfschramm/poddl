@@ -307,6 +307,7 @@ sub process_feed {
         
         for my $entry (@entries) {
             my $title = $entry->title;
+            my $filelink = $entry->link;
             my $enclosure = $entry->enclosure;
             my $pub_date = $entry->issued;  # Extrahiere das Publikationsdatum
             
@@ -321,9 +322,17 @@ sub process_feed {
             
             my $url = $enclosure->url;
             my $type = $enclosure->type;
+
+            my $filename = "";
+            if (length($title)) {
+                $filename = $title;
+            } else {
+                $filelink =~ /([^\/]+)$/;
+                $filename = $1;
+            }
             
+            INFO("[${cGreen}${feed_name}${cClear}] ${cYellow}Analysing: ${filename}${cClear}");
             # Erstelle sicheren Dateinamen aus dem Titel
-            my $filename = $title;
             $filename =~ s/[^a-zA-Z0-9]/_/g;
             $filename .= '.' . guess_extension($type);
             $filename = truncate_filename($filename, 150);  # Kürze auf 150 Zeichen

@@ -6,6 +6,7 @@ settings:
   timeout: 60
   check_pubDate: 1
   check_filesize: 0
+  silent: 0
   only_new_info: 0
 user_agent: "PodcastDownloader/1.0"
 

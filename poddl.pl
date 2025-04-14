@@ -192,7 +192,6 @@ sub download_file {
         show_download_progress($feed_name, $filename, $bytes_received, $total_bytes) unless ($bytes_received > $total_bytes);
         return 1;
     });
-    INFO("\n");
     
     # Überprüfe auf Redirects und folge ihnen manuell falls nötig
     if ($response->is_redirect) {
@@ -230,8 +229,6 @@ sub download_file {
                 show_download_progress($feed_name, $filename, $bytes_received, $total_bytes) unless ($bytes_received > $total_bytes);
                 return 1;
             });
-            printf("\n");
-
             $redirect_count++;
         }
         
@@ -241,6 +238,8 @@ sub download_file {
             return 0;
         }
     }
+
+    printf("\n");
     
     if ($response->is_success) {
         $file_path->spew_raw($content);  # Speichere die gesammelten Daten
@@ -256,7 +255,6 @@ sub download_file {
         INFO("[${cGreen}${feed_name}${cClear}] touch -t $cdate '$file_path'");
         `touch -t $cdate '$file_path'`;
 
-        INFO("\n");
         INFO("[${cGreen}${feed_name}${cClear}] ${cBlue}Download sccuessfull: $filename ${cClear}");
         return 1;
     } else {
@@ -284,7 +282,8 @@ sub download_feed_entry {
     my $type = $enclosure->type;
     
     # Erstelle Dateinamen
-    my $filename = $title;
+    my $filename = "";
+    $filename = $title;
     if (length($filename) < 1) {
         $filename = ($url =~ /([^\/]+)$/)[0];
         if ($filename =~ /^(.*)\.[a-z0-9]{0,5}$/i) {
@@ -328,6 +327,7 @@ sub process_feed {
     }
     $processed_urls->{$feed_url} = 1;
     
+    INFO("${cYellow}##############################################################${cClear}");
     INFO("Analyse feed: $feed_name ($feed_url)");
     
     try {
@@ -347,16 +347,13 @@ sub process_feed {
             or die XML::Feed->errstr;
         
         my @entries = $feed->entries;
-        INFO("${cYellow}##############################################################${cClear}");
-        INFO("[${cGreen}${feed_name}${cClear}] ${cYellow}found: " . scalar(@entries) . " Einträge${cClear}");
+        INFO("[${cGreen}${feed_name}${cClear}] ${cYellow}found: " . scalar(@entries) . " episodes${cClear}");
         
         # Verarbeite Einträge
         my ($downloaded, $failed) = (0, 0);
         for my $entry (@entries) {
             download_feed_entry($entry, $feed_name) ? $downloaded++ : $failed++;
         }
-        
-        INFO("[${cGreen}${feed_name}${cClear}] Download finished: $downloaded of " . scalar(@entries) . " entries downloaded, $failed with error.");
         
         # Verarbeite "next" Link falls vorhanden
         if ($feed_response->content =~ /<atom:link[^>]*rel="next"[^>]*href="([^"]+)"/) {
@@ -369,6 +366,8 @@ sub process_feed {
                 enabled => 1
             }, $processed_urls);
         }
+        
+        INFO("[${cGreen}${feed_name}${cClear}] Download finished: $downloaded of " . scalar(@entries) . " entries downloaded, $failed with error.");
         
     } catch {
         ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Error analysing feed: $_${cClear}");

@@ -102,22 +102,94 @@ sub show_download_progress {
     printf("\r                    [${cGreen}${feed_name}${cClear}] %s %s %3d%% %s", $display_filename, $bar, $percent, $size_info);
 }
 
+# Hilfsfunktion für Whisper-Transkription
+sub transcribe_audio {
+
+    my ($file_path, $feed_name) = @_;
+
+    # Prüfe ob Whisper aktiviert ist
+    return unless $settings->{whisper} && $settings->{whisper}->{enabled};
+    
+    my $whisper_path = $settings->{whisper}->{path};
+    my $whisper_model = $settings->{whisper}->{model};
+    my $seperate_transcript_folder = $settings->{whisper}->{seperate_transcript_folder};
+    INFO("[${cGreen}${feed_name}${cClear}] transcription with: $whisper_path");
+
+    my $transcript_path = $file_path;
+    $transcript_path =~ s/^$settings->{download_dir}\//$settings->{download_dir}\/$seperate_transcript_folder\//;
+
+    my $whisper_params = $settings->{whisper}->{params};
+    $whisper_params =~ /--output-([a-zA-Z]+)/;
+    my $whisper_fileext = $1;
+    
+    if (-f "${transcript_path}.${whisper_fileext}")
+    {
+        INFO("[${cGreen}${feed_name}${cClear}] transcription already existing");
+        return;
+    }
+
+    
+    # Prüfe ob Whisper und Model existieren
+    unless (-x $whisper_path) {
+        ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Whisper executable not found or not executable: $whisper_path${cClear}");
+        return;
+    }
+    
+    unless (-f $whisper_model) {
+        ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Whisper model not found: $whisper_model${cClear}");
+        return;
+    }
+    
+    # Stelle sicher, dass das Transkriptionsverzeichnis existiert
+    my $transcript_dir = path($transcript_path)->parent;
+    unless (-d $transcript_dir) {
+        INFO("[${cGreen}${feed_name}${cClear}] Creating transcript directory: $transcript_dir");
+        eval {
+            $transcript_dir->mkpath;
+        };
+        if ($@) {
+            ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Failed to create transcript directory: $@${cClear}");
+            return;
+        }
+    }
+    
+    $whisper_params = "-otxt" if (length($whisper_params) < 1);
+    my $cmd = sprintf('%s %s --model "%s" -f "%s" -of "%s" >/dev/null 2>&1',
+        $whisper_path,
+        $whisper_params,
+        $whisper_model,
+        $file_path,
+        $transcript_path
+    );
+    INFO("[${cGreen}${feed_name}${cClear}] transcription command: $cmd");
+
+    my $result = system($cmd);
+    if ($result == 0) {
+        INFO("[${cGreen}${feed_name}${cClear}] ${cBlue}Transcription completed: $transcript_path${cClear}");
+    } else {
+        unlink($transcript_path);
+        ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Transcription failed with exit code: $result${cClear}");
+    }
+}
+
 sub check_existing_file {
     my ($file_path, $expected_size) = @_;
     
     return 0 unless -f $file_path;  # Datei existiert nicht
+
     if ($settings->{check_filesize}) {
-        return 0 unless $expected_size; # Keine Größeninformation verfügbar
+        my $current_size = -s $file_path;
+        if ($current_size == $expected_size)
+        {
+            return 1;
+        } else {
+            # Datei existiert, ist aber unvollständig
+            INFO("File already exists, BUT wrong with size ($current_size/$expected_size Bytes) - re-download");
+            return 0;
+        };
     } else {
-    	return 1;
+        return 1;
     }
-    
-    my $current_size = -s $file_path;
-    return 1 if $current_size == $expected_size;  # Datei ist vollständig
-    
-    # Datei existiert, ist aber unvollständig
-    INFO("File already exists, BUT wrong with size ($current_size/$expected_size Bytes) - re-download");
-    return 0;
 }
 
 # Hilfsfunktion zum Kürzen von Dateinamen
@@ -193,6 +265,8 @@ sub download_file {
         return 1;
     });
     
+    printf("\n");
+    
     # Überprüfe auf Redirects und folge ihnen manuell falls nötig
     if ($response->is_redirect) {
         my $redirect_count = 0;
@@ -239,8 +313,6 @@ sub download_file {
         }
     }
 
-    printf("\n");
-    
     if ($response->is_success) {
         $file_path->spew_raw($content);  # Speichere die gesammelten Daten
         
@@ -255,10 +327,12 @@ sub download_file {
         INFO("[${cGreen}${feed_name}${cClear}] touch -t $cdate '$file_path'");
         `touch -t $cdate '$file_path'`;
 
-        INFO("[${cGreen}${feed_name}${cClear}] ${cBlue}Download sccuessfull: $filename ${cClear}");
+        INFO("\n");
+        INFO("[${cGreen}${feed_name}${cClear}] ${cBlue}Download successful: $filename ${cClear}");
+        
         return 1;
     } else {
-        ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Error downloding $url: " . $response->status_line . "${cClear}");
+        ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Error downloading $url: " . $response->status_line . "${cClear}");
         return 0;
     }
     
@@ -298,13 +372,18 @@ sub download_feed_entry {
     
     # Versuche den Download bis zu zweimal
     for my $attempt (1..2) {
-        my $success = try {
-            return download_file($url, $filename, $feed_name, $formatted_date);
-        } catch {
-            ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Download attempt $attempt failed for $filename: $_${cClear}");
-            return 0;
-        };
-        return 1 if $success;
+        my $success = download_file($url, $filename, $feed_name, $formatted_date);
+        
+        if ($success) {
+            # Starte Transkription nach erfolgreichem Download
+            my $feed_dir = $download_dir->child($feed_name);
+            my $file_path = $feed_dir->child($filename);
+            INFO("[${cGreen}${feed_name}${cClear}] ${cYellow}Transcription for: ${file_path}${cClear}") unless ($settings->{silent});
+            transcribe_audio($file_path, $feed_name);
+            return 1;
+        } else {
+            ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Download attempt $attempt failed for $filename${cClear}");
+        }
     }
     
     return 0;

@@ -26,7 +26,7 @@ my $cBlue = "\e[34m";
 binmode(STDOUT, ":encoding(UTF-8)");
 
 # Konfiguration laden
-my $config_file = 'config.yml';
+my $config_file = 'poddl.conf';
 GetOptions('config=s' => \$config_file) or die "${cRed}Error parsing commandline options${cClear}\n";
 
 # Lade und validiere Konfiguration
@@ -103,20 +103,17 @@ sub show_download_progress {
 }
 
 # Hilfsfunktion für Whisper-Transkription
-sub transcribe_audio {
+sub transscribe_audio {
 
     my ($file_path, $feed_name) = @_;
 
-    # Prüfe ob Whisper aktiviert ist
-    return unless $settings->{whisper} && $settings->{whisper}->{enabled};
-    
     my $whisper_path = $settings->{whisper}->{path};
     my $whisper_model = $settings->{whisper}->{model};
-    my $seperate_transcript_folder = $settings->{whisper}->{seperate_transcript_folder};
-    INFO("[${cGreen}${feed_name}${cClear}] transcription with: $whisper_path");
+    my $seperate_transscript_folder = $settings->{whisper}->{seperate_transscript_folder};
+    INFO("[${cGreen}${feed_name}${cClear}] transscription with: $whisper_path") unless ($settings->{silent});
 
     my $transcript_path = $file_path;
-    $transcript_path =~ s/^$settings->{download_dir}\//$settings->{download_dir}\/$seperate_transcript_folder\//;
+    $transcript_path =~ s/^$settings->{download_dir}\//$settings->{download_dir}\/$seperate_transscript_folder\//;
 
     my $whisper_params = $settings->{whisper}->{params};
     $whisper_params =~ /--output-([a-zA-Z]+)/;
@@ -124,8 +121,10 @@ sub transcribe_audio {
     
     if (-f "${transcript_path}.${whisper_fileext}")
     {
-        INFO("[${cGreen}${feed_name}${cClear}] transcription already existing");
+        INFO("[${cGreen}${feed_name}${cClear}] transscription already existing");
         return;
+    } else {
+        INFO("[${cGreen}${feed_name}${cClear}] ${cYellow}transscription starting for: ${file_path}${cClear}");
     }
 
     
@@ -143,7 +142,7 @@ sub transcribe_audio {
     # Stelle sicher, dass das Transkriptionsverzeichnis existiert
     my $transcript_dir = path($transcript_path)->parent;
     unless (-d $transcript_dir) {
-        INFO("[${cGreen}${feed_name}${cClear}] Creating transcript directory: $transcript_dir");
+        INFO("[${cGreen}${feed_name}${cClear}] Creating transcript directory: $transcript_dir") unless ($settings->{silent});
         eval {
             $transcript_dir->mkpath;
         };
@@ -161,14 +160,14 @@ sub transcribe_audio {
         $file_path,
         $transcript_path
     );
-    INFO("[${cGreen}${feed_name}${cClear}] transcription command: $cmd");
+    INFO("[${cGreen}${feed_name}${cClear}] transscription command: $cmd") unless ($settings->{silent});
 
     my $result = system($cmd);
     if ($result == 0) {
-        INFO("[${cGreen}${feed_name}${cClear}] ${cBlue}Transcription completed: $transcript_path${cClear}");
+        INFO("[${cGreen}${feed_name}${cClear}] ${cBlue}transscription completed: $transcript_path${cClear}");
     } else {
         unlink($transcript_path);
-        ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Transcription failed with exit code: $result${cClear}");
+        ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}transscription failed with exit code: $result${cClear}");
     }
 }
 
@@ -341,7 +340,7 @@ sub download_file {
 
 # Hilfsfunktion zum Herunterladen eines Feed-Eintrags
 sub download_feed_entry {
-    my ($entry, $feed_name) = @_;
+    my ($entry, $feed_name, $feed_transscript) = @_;
     
     my $title = $entry->title;
     my $enclosure = $entry->enclosure;
@@ -378,8 +377,7 @@ sub download_feed_entry {
             # Starte Transkription nach erfolgreichem Download
             my $feed_dir = $download_dir->child($feed_name);
             my $file_path = $feed_dir->child($filename);
-            INFO("[${cGreen}${feed_name}${cClear}] ${cYellow}Transcription for: ${file_path}${cClear}") unless ($settings->{silent});
-            transcribe_audio($file_path, $feed_name);
+            transscribe_audio($file_path, $feed_name) if ($feed_transscript);
             return 1;
         } else {
             ERROR("[${cGreen}${feed_name}${cClear}] ${cRed}Download attempt $attempt failed for $filename${cClear}");
@@ -398,6 +396,7 @@ sub process_feed {
     
     my $feed_name = $feed_config->{name};
     my $feed_url = $feed_config->{url};
+    my $feed_transscript = $feed_config->{transscript};
     
     # Verhindere Endlosschleifen
     if ($processed_urls->{$feed_url}) {
@@ -431,7 +430,7 @@ sub process_feed {
         # Verarbeite Einträge
         my ($downloaded, $failed) = (0, 0);
         for my $entry (@entries) {
-            download_feed_entry($entry, $feed_name) ? $downloaded++ : $failed++;
+            download_feed_entry($entry, $feed_name, $feed_transscript) ? $downloaded++ : $failed++;
         }
         
         # Verarbeite "next" Link falls vorhanden
